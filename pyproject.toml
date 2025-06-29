@@ -1,0 +1,48 @@
+[project]
+name = "llm-chats"
+version = "0.1.0"
+description = "A service for multi-LLM conversations to explore topic understanding through discussion"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [
+    { name = "LLM Chats", email = "llm-chats@example.com" }
+]
+keywords = ["llm", "ai", "conversation", "chat", "multi-model"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "openai>=1.0.0",
+    "gradio>=4.0.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+    "asyncio-throttle>=1.0.2",
+    "aiohttp>=3.9.0",
+    "tenacity>=8.2.0",
+]
+
+[project.scripts]
+llm-chats = "llm_chats:main"
+
+[project.urls]
+Homepage = "https://github.com/flyer103/llm-chats"
+Repository = "https://github.com/flyer103/llm-chats"
+Issues = "https://github.com/flyer103/llm-chats/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+]
