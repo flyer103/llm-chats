@@ -12,7 +12,10 @@ from .client import LLMClientFactory, Message
 from .conversation import ConversationManager, ConversationConfig, ConversationState
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,  # Back to INFO level for normal operation
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Global state
@@ -21,7 +24,7 @@ available_platforms: List[str] = []
 
 
 def initialize_clients():
-    """Initialize LLM clients."""
+    """Initialize LLM clients with enhanced error reporting."""
     global conversation_manager, available_platforms
     
     try:
@@ -34,18 +37,46 @@ def initialize_clients():
         clients = LLMClientFactory.create_all_clients(config)
         
         if not clients:
-            return "❌ 无法创建任何LLM客户端"
+            return "❌ 无法创建任何LLM客户端，请检查配置和网络连接"
         
         conversation_manager = ConversationManager(clients)
         available_platforms = [client.platform_name for client in clients]
         
         enabled_list = [client.platform_name for client in clients]
         
-        return f"✅ 成功初始化 {len(clients)} 个LLM平台: {', '.join(enabled_list)}"
+        # Provide additional status information
+        total_configured = config.count_enabled()
+        success_count = len(clients)
+        failed_count = total_configured - success_count
+        
+        result_msg = f"✅ 成功初始化 {success_count} 个LLM平台: {', '.join(enabled_list)}"
+        
+        if failed_count > 0:
+            result_msg += f"\n⚠️ {failed_count} 个平台初始化失败"
+            
+            # Add specific guidance for common issues
+            if any("ollama" in platform.lower() for platform in [c.platform_name for c in clients] if "ollama" in platform.lower()):
+                # Ollama succeeded
+                pass
+            else:
+                # Ollama might have failed
+                result_msg += "\n💡 如果Ollama初始化失败，请确保服务正在运行: ollama serve"
+        
+        return result_msg
         
     except Exception as e:
+        error_msg = str(e)
         logger.error(f"Failed to initialize clients: {e}")
-        return f"❌ 初始化失败: {str(e)}"
+        
+        # Enhanced error messages with troubleshooting tips
+        if "ollama" in error_msg.lower() and "connection" in error_msg.lower():
+            return f"❌ 初始化失败: {error_msg}\n\n💡 故障排除:\n1. 启动Ollama服务: ollama serve\n2. 检查端口占用: lsof -i :11434\n3. 验证Ollama状态: curl http://localhost:11434/api/tags"
+        elif "api key" in error_msg.lower() or "unauthorized" in error_msg.lower():
+            return f"❌ 初始化失败: {error_msg}\n\n💡 故障排除:\n1. 检查API密钥是否正确配置\n2. 验证密钥是否有效且未过期\n3. 确认密钥权限设置"
+        elif "network" in error_msg.lower() or "connection" in error_msg.lower():
+            return f"❌ 初始化失败: {error_msg}\n\n💡 故障排除:\n1. 检查网络连接\n2. 验证防火墙设置\n3. 确认代理配置"
+        else:
+            return f"❌ 初始化失败: {error_msg}\n\n💡 建议: 请检查配置文件和环境变量设置"
 
 
 async def test_platform_config(platform_name: str) -> str:
@@ -108,9 +139,6 @@ def create_conversation(topic: str, max_rounds: int, participants: List[str], ro
     if not participants:
         return "❌ 请选择至少一个参与平台"
     
-    if len(participants) < 2:
-        return "❌ 需要至少2个参与平台才能进行讨论"
-    
     try:
         config = ConversationConfig(
             topic=topic.strip(),
@@ -139,45 +167,113 @@ async def start_conversation_async(conversation_id: str, progress_callback=None)
         raise
 
 
-def format_conversation_display(conversation) -> str:
-    """Format conversation for display."""
+def format_conversation_display(conversation, streaming_content=None) -> str:
+    """Format conversation for display with streaming support."""
     if not conversation:
-        return "未找到对话记录"
+        return "🔍 未找到对话记录"
     
     output = []
-    output.append(f"# 讨论话题: {conversation.config.topic}")
-    output.append(f"**参与者**: {', '.join(conversation.participants)}")
-    output.append(f"**状态**: {conversation.state.value}")
-    output.append(f"**轮次**: {len(conversation.rounds)}/{conversation.config.max_rounds}")
+    output.append(f"# 🎯 讨论话题: {conversation.config.topic}")
+    output.append(f"**👥 参与者**: {', '.join(conversation.participants)}")
+    output.append(f"**📊 状态**: {conversation.state.value}")
+    output.append(f"**🔄 轮次**: {len(conversation.rounds)}/{conversation.config.max_rounds}")
+    output.append("")
     output.append("---")
+    output.append("")
+    
+    if not conversation.rounds:
+        output.append("⏳ 等待对话开始...")
+        # 但仍然需要检查是否有流式内容需要显示
+        if streaming_content:
+            output.append("")
+            output.append("---")
+            output.append("")
+            # 显示第一轮的流式内容
+            output.append("## 🔄 第 1 轮")
+            output.append("⏳ 本轮对话进行中...")
+            output.append("")
+            output.append("### 💬 正在回复中...")
+            output.append("")
+            
+            # 平台图标映射
+            platform_emoji = {
+                "阿里云百炼": "🔵",
+                "火山豆包": "🔴", 
+                "月之暗面": "🌙",
+                "DeepSeek": "🤖",
+                "Ollama": "🏠"
+            }
+            
+            for platform, content in streaming_content.items():
+                if content and content.strip():
+                    emoji = platform_emoji.get(platform, "💬")
+                    output.append(f"#### {emoji} {platform}")
+                    output.append(f'<div class="streaming-content">{content}</div>')
+                    # 添加光标指示符表示正在输入
+                    output.append("")
+                    output.append('<span class="typing-cursor">▋</span> *正在输入中...*')
+                    output.append("")
+            
+            output.append("---")
+            output.append("")
+        else:
+            return "\n".join(output)
+    
+    # 平台图标映射
+    platform_emoji = {
+        "阿里云百炼": "🔵",
+        "火山豆包": "🔴", 
+        "月之暗面": "🌙",
+        "DeepSeek": "🤖",
+        "Ollama": "🏠"
+    }
     
     for round_obj in conversation.rounds:
-        output.append(f"## 第 {round_obj.round_number} 轮")
+        output.append(f"## 🔄 第 {round_obj.round_number} 轮")
         if round_obj.duration:
-            output.append(f"*耗时: {round_obj.duration:.1f}秒*")
+            output.append(f"*⏱️ 耗时: {round_obj.duration:.1f}秒*")
         output.append("")
         
-        for msg in round_obj.messages:
-            if msg.role == "assistant":
-                platform_emoji = {
-                    "阿里云百炼": "🔵",
-                    "火山豆包": "🔴", 
-                    "月之暗面": "🌙",
-                    "DeepSeek": "🤖"
-                }
-                emoji = platform_emoji.get(msg.platform, "💬")
-                output.append(f"### {emoji} {msg.platform}")
-                output.append(msg.content)
+        if not round_obj.messages:
+            output.append("⏳ 本轮对话进行中...")
+            output.append("")
+            
+            # 如果这是最后一轮(正在进行的轮次)且有流式内容，显示在这里
+            if round_obj.round_number == len(conversation.rounds) and streaming_content:
+                output.append("### 💬 正在回复中...")
                 output.append("")
+                
+                for platform, content in streaming_content.items():
+                    if content and content.strip():
+                        emoji = platform_emoji.get(platform, "💬")
+                        output.append(f"#### {emoji} {platform}")
+                        output.append(f'<div class="streaming-content">{content}</div>')
+                        # 添加光标指示符表示正在输入
+                        output.append("")
+                        output.append('<span class="typing-cursor">▋</span> *正在输入中...*')
+                        output.append("")
+        else:
+            for msg in round_obj.messages:
+                if msg.role == "assistant":
+                    emoji = platform_emoji.get(msg.platform, "💬")
+                    output.append(f"### {emoji} {msg.platform}")
+                    
+                    # 确保内容不为空
+                    content = msg.content if msg.content else "💭 [正在思考...]"
+                    output.append(content)
+                    output.append("")
         
         output.append("---")
+        output.append("")
+    
+
     
     return "\n".join(output)
 
 
 def run_conversation(topic: str, max_rounds: int, participants: List[str], 
                     round_timeout: float, progress_display):
-    """Run a complete conversation workflow."""
+    """Run a complete conversation workflow with streaming support."""
     if not conversation_manager:
         yield "❌ 请先初始化LLM客户端", ""
         return
@@ -193,25 +289,76 @@ def run_conversation(topic: str, max_rounds: int, participants: List[str],
     
     yield f"开始讨论话题: {topic}", ""
     
-    # Progress tracking
+    # Progress tracking - 增强流式内容跟踪
     progress_info = {
         "current_round": 0,
         "total_rounds": max_rounds,
         "current_platform": "",
-        "status": "准备中..."
+        "status": "准备中...",
+        "streaming_content": {},  # Store streaming content for each platform
+        "active_streaming": False,  # Track if currently streaming
+        "last_update": time.time()
     }
     
     def update_progress(event_type: str, data: Dict[str, Any]):
+        current_time = time.time()
+        
         if event_type == "round_start":
             progress_info["current_round"] = data["round"]
             progress_info["status"] = f"第 {data['round']} 轮开始"
+            progress_info["streaming_content"] = {}
+            progress_info["active_streaming"] = False
+            # Force update to show the new round
+            progress_info["force_update"] = True
         elif event_type == "participant_thinking":
             progress_info["current_platform"] = data["platform"]
-            progress_info["status"] = f"{data['platform']} 思考中..."
+            if data.get("fallback_reason") == "streaming_failed":
+                progress_info["status"] = f"{data['platform']} 流式连接失败，尝试常规模式..."
+            else:
+                progress_info["status"] = f"{data['platform']} 思考中..."
+            progress_info["streaming_content"][data["platform"]] = ""
+            progress_info["active_streaming"] = False
+            # Force update to show thinking status
+            progress_info["force_update"] = True
+        elif event_type == "participant_streaming":
+            platform = data["platform"]
+            progress_info["current_platform"] = platform
+            progress_info["status"] = f"{platform} 回复中..."
+            progress_info["streaming_content"][platform] = data["partial_content"]
+            progress_info["active_streaming"] = True
+            progress_info["last_update"] = current_time
+            # Mark for immediate update
+            progress_info["force_update"] = True
         elif event_type == "participant_response":
+            platform = data["platform"]
             progress_info["status"] = f"{data['platform']} 回复完成"
+            # Keep the final content in streaming_content for a moment to allow final UI update
+            # Clear the streaming content for this specific platform
+            if platform in progress_info["streaming_content"]:
+                del progress_info["streaming_content"][platform]
+            # Only set active_streaming to False if no other platforms are streaming
+            if not progress_info["streaming_content"]:
+                progress_info["active_streaming"] = False
+            # Force update to show completion status
+            progress_info["force_update"] = True
+        elif event_type == "participant_timeout":
+            platform = data["platform"]
+            timeout_duration = data["timeout_duration"]
+            progress_info["current_platform"] = platform
+            progress_info["status"] = f"{platform} 响应超时 ({timeout_duration}s)"
+            # Clear the streaming content for this platform
+            if platform in progress_info["streaming_content"]:
+                del progress_info["streaming_content"][platform]
+            if not progress_info["streaming_content"]:
+                progress_info["active_streaming"] = False
+            # Force update to show timeout status
+            progress_info["force_update"] = True
         elif event_type == "round_complete":
             progress_info["status"] = f"第 {data['round']} 轮完成 (耗时: {data['duration']:.1f}s)"
+            progress_info["streaming_content"] = {}
+            progress_info["active_streaming"] = False
+            # Force update to show the completed round
+            progress_info["force_update"] = True
     
     # Start conversation
     try:
@@ -225,7 +372,13 @@ def run_conversation(topic: str, max_rounds: int, participants: List[str],
         # Run conversation with periodic updates
         task = loop.create_task(run_with_progress())
         
+        # Track last update time for more responsive streaming
+        last_update_time = time.time()
+        last_streaming_content = {}
+        
         while not task.done():
+            current_time = time.time()
+            
             # Update progress display
             progress_text = f"**进度**: {progress_info['current_round']}/{progress_info['total_rounds']} 轮\n"
             progress_text += f"**状态**: {progress_info['status']}\n"
@@ -234,12 +387,48 @@ def run_conversation(topic: str, max_rounds: int, participants: List[str],
             
             # Get current conversation state
             current_conv = conversation_manager.get_conversation(conversation_id)
-            conversation_display = format_conversation_display(current_conv) if current_conv else ""
             
-            yield progress_text, conversation_display
+            # Format display with streaming content
+            streaming_content = progress_info["streaming_content"] if progress_info["active_streaming"] else None
+            conversation_display = format_conversation_display(current_conv, streaming_content) if current_conv else ""
             
-            # Wait a bit before next update
-            loop.run_until_complete(asyncio.sleep(1))
+            # Force update if streaming content has changed or enough time has passed
+            should_update = False
+            
+            if progress_info["active_streaming"]:
+                # Check if streaming content has changed
+                if streaming_content != last_streaming_content:
+                    should_update = True
+                    last_streaming_content = streaming_content.copy() if streaming_content else {}
+                # Or if enough time has passed (minimum 0.1s for streaming)
+                elif current_time - last_update_time >= 0.1:
+                    should_update = True
+            else:
+                # Non-streaming: update every 0.5s
+                if current_time - last_update_time >= 0.5:
+                    should_update = True
+            
+            # Always update if status changed significantly
+            if not hasattr(progress_info, '_last_status') or progress_info['status'] != progress_info.get('_last_status'):
+                should_update = True
+                progress_info['_last_status'] = progress_info['status']
+            
+            # Check for force update flag
+            if progress_info.get("force_update", False):
+                should_update = True
+                progress_info["force_update"] = False
+            
+            if should_update:
+                yield progress_text, conversation_display
+                last_update_time = current_time
+            
+            # Dynamic sleep - very short for responsive UI
+            if progress_info["active_streaming"]:
+                # Very frequent updates during streaming
+                loop.run_until_complete(asyncio.sleep(0.01))
+            else:
+                # Still responsive when not streaming
+                loop.run_until_complete(asyncio.sleep(0.1))
         
         # Get final result
         final_conversation = task.result()
@@ -249,7 +438,16 @@ def run_conversation(topic: str, max_rounds: int, participants: List[str],
         
     except Exception as e:
         error_msg = f"❌ 讨论过程中发生错误: {str(e)}"
-        logger.error(error_msg)
+        logger.error(f"Conversation error: {e}", exc_info=True)
+        
+        # 提供更详细的错误信息和解决建议
+        if "No valid messages" in str(e):
+            error_msg += "\n\n💡 建议：请检查选择的平台是否正确初始化"
+        elif "timeout" in str(e).lower():
+            error_msg += "\n\n💡 建议：请尝试增加超时时间或检查网络连接"
+        elif "api" in str(e).lower():
+            error_msg += "\n\n💡 建议：请检查API密钥和网络连接"
+        
         yield error_msg, ""
     finally:
         loop.close()
@@ -273,12 +471,282 @@ def create_gradio_app() -> gr.Blocks:
     with gr.Blocks(
         title="LLM多方对话系统",
         css="""
-        .gradio-container {
-            max-width: 1200px !important;
+        /* Force light text in dark mode - simplified approach */
+        @media (prefers-color-scheme: dark) {
+            .gradio-container,
+            .gradio-container * {
+                color: #e0e0e0 !important;
+            }
+            
+            .gradio-container input,
+            .gradio-container textarea {
+                color: #e0e0e0 !important;
+                background-color: #2a2a2a !important;
+                border: 1px solid #555 !important;
+            }
+            
+            .gradio-container input::placeholder,
+            .gradio-container textarea::placeholder {
+                color: #888 !important;
+            }
+            
+            .gradio-container .conversation-display {
+                background-color: #2a2a2a !important;
+                color: #e0e0e0 !important;
+            }
         }
+        
+        /* Root variables for theming */
+        :root {
+            --text-color: #333333;
+            --bg-color: #f9f9f9;
+            --border-color: #ddd;
+            --streaming-bg: #e8f4f8;
+            --error-color: #d32f2f;
+            --error-bg: #ffebee;
+        }
+        
+        /* Dark mode support */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --text-color: #e0e0e0;
+                --bg-color: #2a2a2a;
+                --border-color: #555;
+                --streaming-bg: #1a3a4a;
+                --error-color: #ff6b6b;
+                --error-bg: #4a1a1a;
+            }
+        }
+        
+        .gradio-container {
+            max-width: 100% !important;
+            width: 100% !important;
+            margin: 0 auto !important;
+            padding: 20px !important;
+        }
+        
+        /* Main conversation display area */
         .conversation-display {
-            max-height: 600px;
+            max-height: 70vh;
             overflow-y: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+            background-color: var(--bg-color);
+            color: var(--text-color) !important;
+        }
+        
+        /* Streaming content animation */
+        .streaming-content {
+            position: relative;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        
+        /* Typing cursor animation */
+        .typing-cursor {
+            animation: blink 1s infinite;
+            color: #007bff;
+            font-weight: bold;
+        }
+        
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0; }
+            100% { opacity: 1; }
+        }
+        .conversation-display * {
+            color: var(--text-color) !important;
+        }
+        
+        /* Streaming content styling */
+        .streaming-content {
+            background-color: var(--streaming-bg);
+            border-left: 4px solid #0066cc;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            color: var(--text-color) !important;
+        }
+        
+        /* Text elements styling */
+        .gradio-container .markdown {
+            color: var(--text-color) !important;
+        }
+        .gradio-container .markdown * {
+            color: var(--text-color) !important;
+        }
+        .gradio-container .prose {
+            color: var(--text-color) !important;
+        }
+        .gradio-container .prose * {
+            color: var(--text-color) !important;
+        }
+        
+        /* Input elements */
+        .gradio-container .gr-textbox {
+            color: var(--text-color) !important;
+        }
+        .gradio-container .gr-textbox textarea {
+            color: var(--text-color) !important;
+        }
+        
+        /* General text elements */
+        .gradio-container p, 
+        .gradio-container div, 
+        .gradio-container span,
+        .gradio-container h1,
+        .gradio-container h2,
+        .gradio-container h3,
+        .gradio-container h4,
+        .gradio-container h5,
+        .gradio-container h6 {
+            color: var(--text-color) !important;
+        }
+        
+        /* Error message styling */
+        .gradio-container .gr-error {
+            color: var(--error-color) !important;
+            background-color: var(--error-bg) !important;
+        }
+        
+        /* Modal and alert styling */
+        .gradio-container .gr-alert {
+            color: var(--text-color) !important;
+        }
+        .gradio-container .gr-modal {
+            color: var(--text-color) !important;
+        }
+        .gradio-container .gr-modal * {
+            color: var(--text-color) !important;
+        }
+        
+        /* Comprehensive text color override */
+        .gradio-container * {
+            color: var(--text-color) !important;
+        }
+        
+        /* Force override any conflicting styles */
+        .gradio-container [style*="color: white"],
+        .gradio-container [style*="color: #ffffff"],
+        .gradio-container [style*="color: black"],
+        .gradio-container [style*="color: #000000"] {
+            color: var(--text-color) !important;
+        }
+        
+        /* Additional specific Gradio elements */
+        .gradio-container .wrap,
+        .gradio-container .block,
+        .gradio-container .panel,
+        .gradio-container .form,
+        .gradio-container .gr-compact {
+            color: var(--text-color) !important;
+        }
+        
+        /* Input field specific styling */
+        .gradio-container input[type="text"],
+        .gradio-container input[type="email"],
+        .gradio-container input[type="password"],
+        .gradio-container input[type="number"] {
+            color: var(--text-color) !important;
+        }
+        
+        /* Ensure all text nodes are visible */
+        .gradio-container [class*="label"],
+        .gradio-container [class*="text"],
+        .gradio-container [class*="title"],
+        .gradio-container [class*="description"] {
+            color: var(--text-color) !important;
+        }
+        
+        /* Dark mode specific overrides */
+        @media (prefers-color-scheme: dark) {
+            .gradio-container {
+                background-color: #1a1a1a !important;
+            }
+            
+            /* Ensure buttons are visible in dark mode */
+            .gradio-container .gr-button {
+                color: var(--text-color) !important;
+            }
+            
+            /* Labels and form elements */
+            .gradio-container label {
+                color: var(--text-color) !important;
+            }
+            
+            /* Checkboxes and radio buttons */
+            .gradio-container .gr-checkbox,
+            .gradio-container .gr-radio {
+                color: var(--text-color) !important;
+            }
+            
+            /* Input fields and textareas */
+            .gradio-container input,
+            .gradio-container textarea,
+            .gradio-container select {
+                color: var(--text-color) !important;
+                background-color: #2a2a2a !important;
+                border-color: var(--border-color) !important;
+            }
+            
+            /* Placeholder text */
+            .gradio-container input::placeholder,
+            .gradio-container textarea::placeholder {
+                color: #888888 !important;
+            }
+            
+            /* Gradio specific elements */
+            .gradio-container .gr-form,
+            .gradio-container .gr-box,
+            .gradio-container .gr-panel {
+                background-color: #2a2a2a !important;
+            }
+            
+            /* Markdown and text content */
+            .gradio-container .gr-markdown {
+                color: var(--text-color) !important;
+            }
+            
+            /* Slider components */
+            .gradio-container .gr-slider {
+                color: var(--text-color) !important;
+            }
+            
+            /* Checkbox group items */
+            .gradio-container .gr-checkbox-group label {
+                color: var(--text-color) !important;
+            }
+            
+            /* Force all text to be visible in dark mode */
+            .gradio-container *:not(button):not(input[type="button"]):not(input[type="submit"]) {
+                color: #e0e0e0 !important;
+            }
+            
+            /* Specific override for very stubborn elements */
+            .gradio-container [data-testid] *,
+            .gradio-container .svelte-* {
+                color: #e0e0e0 !important;
+            }
+        }
+        
+        /* Browser-specific dark mode detection */
+        html[data-color-mode="dark"] .gradio-container *,
+        html[data-theme="dark"] .gradio-container *,
+        [data-bs-theme="dark"] .gradio-container *,
+        .dark .gradio-container *,
+        body.dark .gradio-container * {
+            color: #e0e0e0 !important;
+        }
+        
+        /* High specificity override for any remaining dark text */
+        .gradio-container *[style*="color"]:not([style*="color: rgb(224, 224, 224)"]):not([style*="color: #e0e0e0"]) {
+            color: var(--text-color) !important;
         }
         """
     ) as app:
@@ -287,7 +755,7 @@ def create_gradio_app() -> gr.Blocks:
         gr.Markdown("让不同的AI模型就同一话题进行深入讨论，探索通过多方对话理解话题的效果。")
         
         with gr.Row():
-            with gr.Column(scale=1):
+            with gr.Column(scale=1, min_width=300):
                 gr.Markdown("## ⚙️ 系统配置")
                 
                 init_btn = gr.Button("初始化LLM客户端", variant="primary")
@@ -302,7 +770,7 @@ def create_gradio_app() -> gr.Blocks:
                 topic_input = gr.Textbox(
                     label="讨论话题",
                     placeholder="例如：人工智能对未来社会的影响",
-                    lines=2
+                    lines=3
                 )
                 
                 with gr.Row():
@@ -339,7 +807,7 @@ def create_gradio_app() -> gr.Blocks:
                     visible=False
                 )
                 
-            with gr.Column(scale=2):
+            with gr.Column(scale=3, min_width=600):
                 gr.Markdown("## 💬 对话进程")
                 
                 progress_display = gr.Markdown(
@@ -391,6 +859,27 @@ def create_gradio_app() -> gr.Blocks:
         app.load(
             fn=update_init_and_choices,
             outputs=[init_status, participants]
+        )
+        
+        # Add JavaScript for dark mode detection and text visibility
+        app.load(
+            None, 
+            None, 
+            None, 
+            js="""
+            (function() {
+                setTimeout(function() {
+                    const isDarkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                    
+                    if (isDarkMode) {
+                        const style = document.createElement('style');
+                        style.id = 'dark-mode-override';
+                        style.textContent = '.gradio-container *, .gradio-container input, .gradio-container textarea, .gradio-container label { color: #e0e0e0 !important; } .gradio-container input::placeholder, .gradio-container textarea::placeholder { color: #888 !important; }';
+                        document.head.appendChild(style);
+                    }
+                }, 1000);
+            })();
+            """
         )
     
     return app

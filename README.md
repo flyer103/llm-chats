@@ -236,67 +236,6 @@ LOG_LEVEL=DEBUG
 python -c "from llm_chats.config import get_config; print(get_config())"
 ```
 
-## 🤝 贡献指南
-
-欢迎提交Issue和Pull Request！
-
-1. Fork项目
-2. 创建特性分支: `git checkout -b feature/amazing-feature`
-3. 提交更改: `git commit -m 'Add amazing feature'`
-4. 推送分支: `git push origin feature/amazing-feature`
-5. 提交Pull Request
-
 ## 📄 许可证
 
 本项目采用 [Apache License 2.0](LICENSE) 许可证。
-
-## 🙏 致谢
-
-- [UV](https://github.com/astral-sh/uv) - 现代Python包管理器
-- [OpenAI Python SDK](https://github.com/openai/openai-python) - 统一API接口
-- [Gradio](https://github.com/gradio-app/gradio) - Web界面框架
-- 各大LLM平台提供的优秀API服务
-
-## 📞 联系我们
-
-- 项目地址: https://github.com/your-username/llm-chats
-- 问题反馈: [GitHub Issues](https://github.com/your-username/llm-chats/issues)
-
----
-
-**让AI们对话，让思想碰撞！** 🚀✨
-
-## 🔥 火山豆包配置重要更新
-
-### 问题说明
-之前版本中火山豆包出现404错误：`The model or endpoint Doubao-1.5-pro-32k does not exist`
-
-### 根本原因
-火山豆包API使用的是**自定义推理接入点 (Endpoint ID)**，而不是通用的模型名称。
-
-### 解决方案 ✅
-**已根据实际开通的接入点更新配置**：
-
-- **模型ID**: `doubao-seed-1-6-250615`
-- **接入点**: `ep-m-20250629223026-prr94`
-
-### 正确配置
-```bash
-# .env 文件配置
-DOUBAO_API_KEY=your_api_key_here
-DOUBAO_MODEL=ep-m-20250629223026-prr94  # 使用实际接入点
-```
-
-### 验证配置
-通过启动应用验证配置是否正确：
-```bash
-# 启动应用进行验证
-python run.py
-```
-
-### 关于火山豆包接入点
-火山豆包平台使用两种方式：
-1. **预置推理接入点**: 使用预设模型ID（如 `doubao-seed-1.6`）
-2. **自定义推理接入点**: 在控制台创建，获得特定的Endpoint ID（如 `ep-m-20250629223026-prr94`）
-
-根据文档，当前已开通的是自定义推理接入点，因此必须使用正确的Endpoint ID。

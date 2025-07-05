@@ -33,6 +33,7 @@ class PlatformConfigs:
     doubao_config: Optional[LLMConfig] = None  
     moonshot_config: Optional[LLMConfig] = None
     deepseek_config: Optional[LLMConfig] = None
+    ollama_config: Optional[LLMConfig] = None
     
     @classmethod
     def from_env(cls) -> 'PlatformConfigs':
@@ -102,11 +103,34 @@ class PlatformConfigs:
             except ValueError as e:
                 logger.warning(f"DeepSeek配置错误: {e}")
         
+        # Ollama - 本地模型
+        ollama_config = None
+        ollama_enabled = os.getenv('OLLAMA_ENABLED', 'false').lower() == 'true'
+        if ollama_enabled:
+            try:
+                # 智能处理 base_url，自动添加 /v1 后缀
+                base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434/v1')
+                if not base_url.endswith('/v1'):
+                    base_url = base_url.rstrip('/') + '/v1'
+                
+                ollama_config = LLMConfig(
+                    name="Ollama",
+                    model=os.getenv('OLLAMA_MODEL', 'deepseek-r1:8b'),  # 使用实际可用的模型
+                    api_key=os.getenv('OLLAMA_API_KEY', 'ollama'),  # Ollama doesn't require API key
+                    base_url=base_url,
+                    temperature=float(os.getenv('OLLAMA_TEMPERATURE', '0.7')),
+                    max_tokens=int(os.getenv('OLLAMA_MAX_TOKENS', '1000'))
+                )
+                logger.info(f"Ollama配置: {base_url}, 模型: {ollama_config.model}")
+            except ValueError as e:
+                logger.warning(f"Ollama配置错误: {e}")
+        
         return cls(
             alibaba_config=alibaba_config,
             doubao_config=doubao_config,
             moonshot_config=moonshot_config, 
-            deepseek_config=deepseek_config
+            deepseek_config=deepseek_config,
+            ollama_config=ollama_config
         )
     
     def get_enabled_platforms(self) -> Dict[str, LLMConfig]:
@@ -120,6 +144,8 @@ class PlatformConfigs:
             enabled['moonshot'] = self.moonshot_config
         if self.deepseek_config:
             enabled['deepseek'] = self.deepseek_config
+        if self.ollama_config:
+            enabled['ollama'] = self.ollama_config
         return enabled
     
     def get_enabled_configs(self) -> List[LLMConfig]:

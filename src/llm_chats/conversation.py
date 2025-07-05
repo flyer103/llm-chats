@@ -26,12 +26,43 @@ class ConversationConfig:
     """Configuration for a conversation."""
     topic: str
     max_rounds: int = 10
-    max_participants: int = 4
+    max_participants: int = 8  # Increased to support all platforms + future expansion
     round_timeout: float = 60.0  # seconds
     system_prompt: str = field(default="")
     
     def __post_init__(self):
         if not self.system_prompt:
+            # Default system prompt for multi-participant discussions
+            self.system_prompt = f"""你是一个AI助手，正在参与关于"{self.topic}"的多方讨论。
+
+讨论规则：
+1. 请就主题发表你的观点和见解
+2. 认真倾听其他参与者的观点
+3. 可以提出问题、反驳或补充
+4. 保持讨论的建设性和深度
+5. 每次回复控制在200字以内
+6. 避免重复之前已经充分讨论的内容
+
+当前讨论主题：{self.topic}"""
+    
+    def set_system_prompt_for_participants(self, participant_count: int):
+        """Set system prompt based on participant count."""
+        if participant_count == 1:
+            self.system_prompt = f"""你是一个AI助手，正在深入分析和思考话题"{self.topic}"。
+
+分析要求：
+1. 请从多个角度深入分析这个话题
+2. 每轮思考时可以选择不同的视角或层面
+3. 可以提出问题、假设和论证
+4. 保持分析的逻辑性和深度
+5. 每次回复控制在300字以内
+6. 逐步深入，避免重复相同的观点
+
+当前分析主题：{self.topic}
+
+你将进行多轮深入思考，每轮都尝试从新的角度或更深的层面来分析这个话题。"""
+        else:
+            # Keep the original multi-participant prompt
             self.system_prompt = f"""你是一个AI助手，正在参与关于"{self.topic}"的多方讨论。
 
 讨论规则：
@@ -136,6 +167,9 @@ class ConversationManager:
         if len(participant_platforms) > config.max_participants:
             raise ValueError(f"Too many participants: {len(participant_platforms)} > {config.max_participants}")
         
+        # Set system prompt based on participant count
+        config.set_system_prompt_for_participants(len(participant_platforms))
+        
         conversation_id = f"conv_{int(time.time())}_{len(self.conversations)}"
         conversation = Conversation(
             id=conversation_id,
@@ -175,6 +209,9 @@ class ConversationManager:
                 
                 round_obj = ConversationRound(round_number=round_num, start_time=time.time())
                 
+                # 立即添加轮次对象到对话中，这样UI就能显示正在进行的轮次
+                conversation.add_round(round_obj)
+                
                 if progress_callback:
                     progress_callback("round_start", {
                         "round": round_num,
@@ -191,10 +228,18 @@ class ConversationManager:
                         context = initial_context + conversation.get_all_messages()
                         
                         # Add a prompt for the current participant
-                        if round_num == 1:
-                            user_prompt = f"请开始讨论话题：{conversation.config.topic}。分享你的初步观点。"
+                        if len(conversation.participants) == 1:
+                            # Single participant - deep analysis mode
+                            if round_num == 1:
+                                user_prompt = f"请开始深入分析话题：{conversation.config.topic}。从你认为最重要的角度开始分析。"
+                            else:
+                                user_prompt = f"基于以上分析，请从新的角度继续深入思考话题'{conversation.config.topic}'。"
                         else:
-                            user_prompt = f"基于以上讨论，请继续就话题'{conversation.config.topic}'发表你的观点。"
+                            # Multi-participant - discussion mode
+                            if round_num == 1:
+                                user_prompt = f"请开始讨论话题：{conversation.config.topic}。分享你的初步观点。"
+                            else:
+                                user_prompt = f"基于以上讨论，请继续就话题'{conversation.config.topic}'发表你的观点。"
                         
                         context.append(Message(
                             role="user",
@@ -208,19 +253,88 @@ class ConversationManager:
                                 "round": round_num
                             })
                         
-                        # Get response from LLM
+                        # Get response from LLM with streaming
                         client = self.clients[platform]
-                        response = await asyncio.wait_for(
-                            client.chat(context),
-                            timeout=conversation.config.round_timeout
-                        )
                         
-                        # Create response message
+                        # Initialize streaming response
+                        streaming_content = ""
+                        message_timestamp = time.time()
+                        
+                        try:
+                            stream_successful = False
+                            async for chunk in client.stream_chat(context):
+                                if conversation.state != ConversationState.RUNNING:
+                                    break
+                                    
+                                streaming_content += chunk
+                                stream_successful = True
+                                
+                                # Send streaming update to UI immediately
+                                if progress_callback:
+                                    progress_callback("participant_streaming", {
+                                        "platform": platform,
+                                        "round": round_num,
+                                        "partial_content": streaming_content,
+                                        "chunk": chunk
+                                    })
+                                
+                                # Minimal delay to prevent overwhelming the UI
+                                await asyncio.sleep(0.001)
+                                
+                        except Exception as e:
+                            error_msg = str(e)
+                            logger.error(f"Streaming error for {platform}: {e}")
+                            
+                            # Classify error type for better handling
+                            is_connection_error = any(keyword in error_msg.lower() for keyword in [
+                                'connection', 'timeout', 'network', 'unreachable', 'refused'
+                            ])
+                            
+                            is_ollama_error = "ollama" in platform.lower() and is_connection_error
+                            
+                            # Fall back to non-streaming if streaming fails
+                            try:
+                                if progress_callback:
+                                    progress_callback("participant_thinking", {
+                                        "platform": platform,
+                                        "round": round_num,
+                                        "fallback_reason": "streaming_failed"
+                                    })
+                                
+                                logger.info(f"Attempting fallback to non-streaming for {platform}...")
+                                response = await asyncio.wait_for(
+                                    client.chat(context),
+                                    timeout=conversation.config.round_timeout
+                                )
+                                streaming_content = response.content
+                                logger.info(f"Fallback successful for {platform}")
+                                
+                            except Exception as fallback_e:
+                                fallback_error_msg = str(fallback_e)
+                                logger.error(f"Fallback error for {platform}: {fallback_e}")
+                                
+                                # Generate user-friendly error message based on error type
+                                if is_ollama_error:
+                                    streaming_content = f"[Ollama连接失败: 请确保Ollama服务正在运行 (ollama serve)]"
+                                elif "401" in fallback_error_msg or "unauthorized" in fallback_error_msg.lower():
+                                    streaming_content = f"[{platform}认证失败: API密钥无效或已过期]"
+                                elif "429" in fallback_error_msg or "rate limit" in fallback_error_msg.lower():
+                                    streaming_content = f"[{platform}请求频率超限: 请稍后重试]"
+                                elif "timeout" in fallback_error_msg.lower():
+                                    streaming_content = f"[{platform}连接超时: 请检查网络连接]"
+                                elif "404" in fallback_error_msg:
+                                    streaming_content = f"[{platform}模型不存在: 请检查模型配置]"
+                                else:
+                                    # Truncate very long error messages
+                                    error_preview = fallback_error_msg[:100] + "..." if len(fallback_error_msg) > 100 else fallback_error_msg
+                                    streaming_content = f"[{platform}服务错误: {error_preview}]"
+                        
+                        # Create final response message
                         message = Message(
                             role="assistant",
-                            content=response.content,
+                            content=streaming_content,
                             platform=platform,
-                            timestamp=time.time()
+                            timestamp=message_timestamp
                         )
                         
                         round_obj.messages.append(message)
@@ -236,10 +350,19 @@ class ConversationManager:
                         await asyncio.sleep(1)
                         
                     except asyncio.TimeoutError:
-                        logger.warning(f"Timeout for {platform} in round {round_num}")
+                        timeout_duration = conversation.config.round_timeout
+                        logger.warning(f"Timeout for {platform} in round {round_num} after {timeout_duration}s")
+                        
+                        if progress_callback:
+                            progress_callback("participant_timeout", {
+                                "platform": platform,
+                                "round": round_num,
+                                "timeout_duration": timeout_duration
+                            })
+                        
                         error_msg = Message(
                             role="assistant",
-                            content="[响应超时]",
+                            content=f"[响应超时: {platform}在{timeout_duration}秒内未响应，请检查网络连接或增加超时时间]",
                             platform=platform,
                             timestamp=time.time()
                         )
@@ -278,7 +401,8 @@ class ConversationManager:
                         round_obj.messages.append(error_msg)
                 
                 round_obj.end_time = time.time()
-                conversation.add_round(round_obj)
+                # 轮次对象已经在开始时添加到对话中了，这里只需要更新时间
+                conversation.updated_at = time.time()
                 
                 if progress_callback:
                     progress_callback("round_complete", {
