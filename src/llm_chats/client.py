@@ -13,6 +13,48 @@ from .config import LLMConfig
 logger = logging.getLogger(__name__)
 
 
+def validate_and_clean_messages(messages: List['Message']) -> List['Message']:
+    """
+    Validate and clean messages to ensure they meet API requirements.
+    
+    Args:
+        messages: List of Message objects to validate
+        
+    Returns:
+        List of cleaned Message objects
+    """
+    cleaned_messages = []
+    
+    for msg in messages:
+        # Skip assistant messages with empty content
+        if msg.role == "assistant" and (not msg.content or msg.content.strip() == ""):
+            logger.warning(f"Skipping empty assistant message from {msg.platform}")
+            continue
+        
+        # Ensure content is not None and has some content
+        content = msg.content.strip() if msg.content else ""
+        
+        # Provide default content for empty messages
+        if not content:
+            if msg.role == "system":
+                content = "你是一个AI助手。"
+            elif msg.role == "user":
+                content = "请继续对话。"
+            else:
+                content = "[消息内容为空]"
+        
+        # Create a new message with cleaned content
+        cleaned_msg = Message(
+            role=msg.role,
+            content=content,
+            platform=msg.platform,
+            timestamp=msg.timestamp
+        )
+        cleaned_messages.append(cleaned_msg)
+    
+    return cleaned_messages
+
+
 @dataclass
 class Message:
     """Represents a conversation message."""
@@ -49,10 +91,17 @@ class BaseLLMClient(ABC):
     async def chat(self, messages: List[Message]) -> ChatResponse:
         """Send chat completion request."""
         try:
+            # Validate and clean messages
+            cleaned_messages = validate_and_clean_messages(messages)
+            
+            # Ensure we have at least one message
+            if not cleaned_messages:
+                raise ValueError("No valid messages to send")
+            
             # Convert messages to OpenAI format
             openai_messages = [
                 {"role": msg.role, "content": msg.content}
-                for msg in messages
+                for msg in cleaned_messages
             ]
             
             response = await self.client.chat.completions.create(
@@ -62,8 +111,14 @@ class BaseLLMClient(ABC):
                 temperature=self.config.temperature
             )
             
+            # Ensure response content is not empty
+            response_content = response.choices[0].message.content
+            if not response_content or response_content.strip() == "":
+                response_content = f"[{self.platform_name}响应内容为空]"
+                logger.warning(f"{self.platform_name} returned empty response, using placeholder")
+            
             return ChatResponse(
-                content=response.choices[0].message.content or "",
+                content=response_content,
                 platform=self.platform_name,
                 model=self.config.model,
                 usage=response.usage.model_dump() if response.usage else None
@@ -100,9 +155,16 @@ class BaseLLMClient(ABC):
     async def stream_chat(self, messages: List[Message]) -> AsyncGenerator[str, None]:
         """Stream chat completion response."""
         try:
+            # Validate and clean messages
+            cleaned_messages = validate_and_clean_messages(messages)
+            
+            # Ensure we have at least one message
+            if not cleaned_messages:
+                raise ValueError("No valid messages to send")
+            
             openai_messages = [
                 {"role": msg.role, "content": msg.content}
-                for msg in messages
+                for msg in cleaned_messages
             ]
             
             stream = await self.client.chat.completions.create(

@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [
-    { name = "LLM Chats", email = "llm-chats@example.com" }
+    { name = "flyer103", email = "flyer103@gmail.com" }
 ]
 keywords = ["llm", "ai", "conversation", "chat", "multi-model"]
 classifiers = [

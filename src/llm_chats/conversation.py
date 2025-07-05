@@ -248,20 +248,26 @@ class ConversationManager:
                         error_str = str(e)
                         logger.error(f"Error for {platform} in round {round_num}: {e}")
                         
-                        # 生成用户友好的错误消息
+                        # 生成用户友好的错误消息，确保不为空
                         if "404" in error_str and "NotFound" in error_str:
-                            if platform == "doubao":
-                                error_content = f"[配置错误: 火山豆包endpoint ID无效，请检查DOUBAO_MODEL配置]"
+                            if platform == "火山豆包":
+                                error_content = "[配置错误: 火山豆包endpoint ID无效，请检查DOUBAO_MODEL配置]"
                             else:
-                                error_content = f"[模型不存在或无权限访问]"
+                                error_content = "[模型不存在或无权限访问]"
                         elif "402" in error_str and "Payment Required" in error_str:
-                            error_content = f"[账户余额不足，请充值]"
+                            error_content = "[账户余额不足，请充值]"
                         elif "401" in error_str or "Unauthorized" in error_str:
-                            error_content = f"[API密钥无效]"
+                            error_content = "[API密钥无效]"
                         elif "429" in error_str:
-                            error_content = f"[请求频率超限，请稍后重试]"
+                            error_content = "[请求频率超限，请稍后重试]"
+                        elif "400" in error_str and "empty" in error_str:
+                            error_content = "[消息格式错误，可能包含空内容]"
                         else:
                             error_content = f"[错误: {error_str[:100]}...]" if len(error_str) > 100 else f"[错误: {error_str}]"
+                        
+                        # 确保错误内容不为空
+                        if not error_content or error_content.strip() == "":
+                            error_content = f"[{platform}发生未知错误]"
                         
                         error_msg = Message(
                             role="assistant",
