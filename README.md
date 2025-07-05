@@ -106,18 +106,15 @@ python run.py
 # 方式2: UV包管理器启动
 uv run llm-chats
 
-# 方式3: 离线模式启动
-python offline_start.py
-
-# 方式4: 简单启动
+# 方式3: 简单启动
 python main.py
 ```
 
-### 4. 使用配置向导
+### 4. 配置验证
 
 ```bash
-# 交互式配置向导
-python setup_guide.py
+# 验证配置是否正确
+python -c "from llm_chats.config import get_config; config = get_config(); enabled = config.get_enabled_platforms(); print('已配置平台:', list(enabled.keys()))"
 ```
 
 ## 🎯 使用场景推荐
@@ -181,8 +178,6 @@ llm-chats/
 │   └── 2025.06.29.md       # 设计文档
 ├── conversations/          # 对话历史 (自动创建)
 ├── run.py                  # 智能启动脚本
-├── offline_start.py        # 离线启动脚本
-├── setup_guide.py          # 配置向导
 ├── main.py                 # 简单启动
 ├── env.example             # 环境变量模板
 ├── pyproject.toml          # UV项目配置
@@ -237,11 +232,8 @@ GRADIO_TITLE=多LLM对话系统
 # 启用调试日志
 LOG_LEVEL=DEBUG
 
-# 测试配置
-python setup_guide.py
-
 # 检查环境变量
-python -c "from src.llm_chats.config import get_config; print(get_config())"
+python -c "from llm_chats.config import get_config; print(get_config())"
 ```
 
 ## 🤝 贡献指南
@@ -296,13 +288,10 @@ DOUBAO_MODEL=ep-m-20250629223026-prr94  # 使用实际接入点
 ```
 
 ### 验证配置
-运行测试脚本验证配置是否正确：
+通过启动应用验证配置是否正确：
 ```bash
-# 使用UV运行
-uv run python test_doubao_endpoint.py
-
-# 或直接运行
-python test_doubao_endpoint.py
+# 启动应用进行验证
+python run.py
 ```
 
 ### 关于火山豆包接入点
