@@ -63,6 +63,34 @@ class Message:
     content: str
     platform: Optional[str] = None
     timestamp: Optional[float] = None
+    # File attachment support
+    attachments: Optional[List[Dict[str, Any]]] = None
+    
+    def has_attachments(self) -> bool:
+        """Check if message has attachments."""
+        return self.attachments is not None and len(self.attachments) > 0
+    
+    def get_attachment_summary(self) -> str:
+        """Get a summary of attachments for display."""
+        if not self.has_attachments():
+            return ""
+        
+        summaries = []
+        # mypy: self.attachments is not None here because has_attachments() returned True
+        for attachment in self.attachments or []:
+            file_info = attachment.get('file_info', {})
+            name = file_info.get('name', 'unknown')
+            mime_type = file_info.get('mime_type', 'unknown')
+            size = file_info.get('size', 0)
+            status = attachment.get('processing_status', 'unknown')
+            
+            if status == 'success':
+                word_count = attachment.get('word_count', 0)
+                summaries.append(f"📎 {name} ({mime_type}, {size} bytes, {word_count} words)")
+            else:
+                summaries.append(f"❌ {name} ({mime_type}, processing failed)")
+        
+        return "\n".join(summaries)
 
 
 @dataclass

@@ -157,6 +157,45 @@ class PlatformConfigs:
         return len(self.get_enabled_platforms())
 
 
+@dataclass
+class FileProcessingConfig:
+    """Configuration for file processing."""
+    max_file_size: int = 50 * 1024 * 1024  # 50MB
+    max_pdf_pages: int = 100
+    max_image_width: int = 4096
+    max_image_height: int = 4096
+    supported_file_types: Optional[List[str]] = None
+    enable_ocr: bool = True
+    ocr_languages: str = "chi_sim+eng"
+    temp_file_dir: str = "./temp_files"
+    
+    def __post_init__(self):
+        if self.supported_file_types is None:
+            self.supported_file_types = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff', 'webp']
+    
+    @classmethod
+    def from_env(cls) -> 'FileProcessingConfig':
+        """Create file processing config from environment variables."""
+        supported_types = os.getenv('SUPPORTED_FILE_TYPES', 'pdf,png,jpg,jpeg,gif,bmp,tiff,webp')
+        supported_types_list = [t.strip() for t in supported_types.split(',')]
+        
+        return cls(
+            max_file_size=int(os.getenv('MAX_FILE_SIZE', '52428800')),
+            max_pdf_pages=int(os.getenv('MAX_PDF_PAGES', '100')),
+            max_image_width=int(os.getenv('MAX_IMAGE_WIDTH', '4096')),
+            max_image_height=int(os.getenv('MAX_IMAGE_HEIGHT', '4096')),
+            supported_file_types=supported_types_list,
+            enable_ocr=os.getenv('ENABLE_OCR', 'true').lower() == 'true',
+            ocr_languages=os.getenv('OCR_LANGUAGES', 'chi_sim+eng'),
+            temp_file_dir=os.getenv('TEMP_FILE_DIR', './temp_files')
+        )
+
+
 def get_config() -> PlatformConfigs:
     """Get platform configurations."""
-    return PlatformConfigs.from_env() 
+    return PlatformConfigs.from_env()
+
+
+def get_file_processing_config() -> FileProcessingConfig:
+    """Get file processing configuration."""
+    return FileProcessingConfig.from_env() 

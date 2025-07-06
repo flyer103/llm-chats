@@ -18,6 +18,7 @@
 - 🔧 **灵活配置**: 支持环境变量配置，易于部署和管理
 - 🛡️ **错误处理**: 完善的错误处理和重试机制
 - 🌐 **统一接口**: 使用OpenAI SDK统一各平台调用接口
+- 📎 **文件上传**: 支持PDF、图片等文件上传，智能提取内容作为对话上下文
 
 ## 🆕 2025年6月更新亮点
 
@@ -69,8 +70,15 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone https://github.com/your-username/llm-chats.git
 cd llm-chats
 
-# 安装依赖
+# 安装依赖 (包括新增的文件处理依赖)
 uv sync
+
+# 安装额外的系统依赖 (用于OCR功能)
+# Ubuntu/Debian:
+sudo apt-get install tesseract-ocr tesseract-ocr-chi-sim libmagic1
+# macOS:
+brew install tesseract tesseract-lang libmagic
+# Windows: 请参考 https://github.com/UB-Mannheim/tesseract/wiki
 ```
 
 ### 2. 配置API密钥

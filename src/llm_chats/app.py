@@ -10,6 +10,7 @@ import gradio as gr
 from .config import get_config
 from .client import LLMClientFactory, Message
 from .conversation import ConversationManager, ConversationConfig, ConversationState
+from .file_processor import process_uploaded_file, format_file_content_for_context
 
 # Configure logging
 logging.basicConfig(
@@ -126,6 +127,97 @@ async def test_platform_config(platform_name: str) -> str:
 def get_platform_choices():
     """Get available platform choices for UI."""
     return [(platform, platform) for platform in available_platforms]
+
+
+def process_uploaded_files(files) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    Process uploaded files and return processing results.
+    
+    Args:
+        files: List of uploaded file paths from Gradio
+        
+    Returns:
+        Tuple of (processed_files_list, status_message)
+    """
+    if not files:
+        return [], ""
+    
+    processed_files = []
+    status_messages = []
+    
+    for file_path in files:
+        if file_path is None:
+            continue
+            
+        try:
+            # Process the file
+            result = process_uploaded_file(file_path)
+            processed_files.append(result)
+            
+            # Generate status message
+            file_info = result.get('file_info', {})
+            file_name = file_info.get('name', 'unknown')
+            
+            if result['processing_status'] == 'success':
+                word_count = result.get('word_count', 0)
+                status_messages.append(f"✅ {file_name}: 成功提取 {word_count} 个词")
+            else:
+                error_msg = result.get('error', '未知错误')
+                status_messages.append(f"❌ {file_name}: {error_msg}")
+                
+        except Exception as e:
+            status_messages.append(f"❌ 处理文件失败: {str(e)}")
+    
+    status_text = "\n".join(status_messages) if status_messages else ""
+    return processed_files, status_text
+
+
+def create_conversation_with_files(topic: str, max_rounds: int, participants: List[str], 
+                                  round_timeout: float, processed_files: List[Dict[str, Any]]) -> str:
+    """Create a new conversation with file attachments."""
+    if not conversation_manager:
+        return "❌ 请先初始化LLM客户端"
+    
+    if not topic.strip():
+        return "❌ 请输入讨论话题"
+    
+    if not participants:
+        return "❌ 请选择至少一个参与平台"
+    
+    try:
+        # Create enhanced topic with file context
+        enhanced_topic = topic.strip()
+        
+        # Add file content to topic if files are processed
+        if processed_files:
+            file_contexts = []
+            for file_data in processed_files:
+                if file_data['processing_status'] == 'success':
+                    file_context = format_file_content_for_context(file_data)
+                    file_contexts.append(file_context)
+            
+            if file_contexts:
+                enhanced_topic += "\n\n" + "\n\n".join(file_contexts)
+        
+        config = ConversationConfig(
+            topic=enhanced_topic,
+            max_rounds=max_rounds,
+            round_timeout=round_timeout
+        )
+        
+        conversation_id = conversation_manager.create_conversation(config, participants)
+        
+        file_summary = ""
+        if processed_files:
+            successful_files = [f for f in processed_files if f['processing_status'] == 'success']
+            if successful_files:
+                file_summary = f"，包含 {len(successful_files)} 个附件"
+        
+        return f"✅ 创建对话成功{file_summary}！对话ID: {conversation_id}"
+        
+    except Exception as e:
+        logger.error(f"Failed to create conversation with files: {e}")
+        return f"❌ 创建对话失败: {str(e)}"
 
 
 def create_conversation(topic: str, max_rounds: int, participants: List[str], round_timeout: float) -> str:
@@ -773,6 +865,25 @@ def create_gradio_app() -> gr.Blocks:
                     lines=3
                 )
                 
+                # File upload section
+                gr.Markdown("## 📎 文件上传")
+                
+                file_upload = gr.File(
+                    label="上传附件 (支持PDF、图片等)",
+                    file_count="multiple",
+                    file_types=[".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"],
+                    visible=True
+                )
+                
+                file_status = gr.Textbox(
+                    label="文件处理状态",
+                    interactive=False,
+                    visible=False,
+                    lines=3
+                )
+                
+                process_files_btn = gr.Button("处理文件", variant="secondary", visible=False)
+                
                 with gr.Row():
                     max_rounds = gr.Slider(
                         label="最大轮次",
@@ -820,11 +931,54 @@ def create_gradio_app() -> gr.Blocks:
                     elem_classes=["conversation-display"]
                 )
         
+        # Global state for processed files
+        processed_files_state = []
+        
         # Event handlers
         def update_init_and_choices():
             result = initialize_clients()
             choices = get_platform_choices()
             return result, gr.update(choices=choices, value=[])
+        
+        def handle_file_upload(files):
+            """Handle file upload and processing."""
+            nonlocal processed_files_state
+            
+            if not files:
+                processed_files_state = []
+                return gr.update(visible=False), gr.update(visible=False)
+            
+            # Process files
+            processed_files_state, status_text = process_uploaded_files(files)
+            
+            if status_text:
+                return gr.update(value=status_text, visible=True), gr.update(visible=True)
+            else:
+                return gr.update(visible=False), gr.update(visible=False)
+        
+        def run_conversation_with_files(topic, max_rounds, participants, round_timeout, progress_display):
+            """Run conversation with file attachments."""
+            nonlocal processed_files_state
+            
+            # Create conversation with files
+            creation_result = create_conversation_with_files(
+                topic, max_rounds, participants, round_timeout, processed_files_state
+            )
+            
+            if not creation_result.startswith("✅"):
+                yield creation_result, ""
+                return
+            
+            # Extract conversation ID from result
+            conversation_id = creation_result.split("对话ID: ")[1] if "对话ID: " in creation_result else ""
+            
+            if not conversation_id:
+                yield "❌ 无法获取对话ID", ""
+                return
+            
+            # Run the conversation (reuse existing logic)
+            # Use yield from to properly delegate to the generator
+            yield from run_conversation(topic, max_rounds, participants, round_timeout, progress_display)
         
         async def test_all_platforms(selected_platforms):
             """Test all selected platform configurations."""
@@ -849,8 +1003,15 @@ def create_gradio_app() -> gr.Blocks:
             outputs=[test_result]
         )
         
+        # File upload event handlers
+        file_upload.upload(
+            fn=handle_file_upload,
+            inputs=[file_upload],
+            outputs=[file_status, process_files_btn]
+        )
+        
         start_btn.click(
-            fn=run_conversation,
+            fn=run_conversation_with_files,
             inputs=[topic_input, max_rounds, participants, round_timeout, progress_display],
             outputs=[progress_display, conversation_display]
         )
