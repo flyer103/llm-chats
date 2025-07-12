@@ -11,6 +11,8 @@ from .config import get_config
 from .client import LLMClientFactory, Message
 from .conversation import ConversationManager, ConversationConfig, ConversationState
 from .file_processor import process_uploaded_file, format_file_content_for_context
+from .summarizer import ConversationSummarizer, SummaryConfig
+from .model_updater import ModelUpdater
 
 # Configure logging
 logging.basicConfig(
@@ -22,6 +24,11 @@ logger = logging.getLogger(__name__)
 # Global state
 conversation_manager: Optional[ConversationManager] = None
 available_platforms: List[str] = []
+
+# Global state for caching model information
+_model_info_cache = {}
+_model_info_cache_timestamp = 0
+_model_info_cache_ttl = 300  # 5 minutes cache
 
 
 def initialize_clients():
@@ -124,9 +131,99 @@ async def test_platform_config(platform_name: str) -> str:
             return f"❌ {platform_name} 测试失败: {error_str[:100]}..."
 
 
+def get_platform_model_info() -> Dict[str, str]:
+    """Get model information for each platform with caching."""
+    global _model_info_cache, _model_info_cache_timestamp
+    
+    current_time = time.time()
+    
+    # Check if we have valid cached data
+    if (_model_info_cache and 
+        current_time - _model_info_cache_timestamp < _model_info_cache_ttl):
+        return _model_info_cache
+    
+    try:
+        from .model_updater import ModelUpdater
+        
+        logger.info("Fetching latest model information...")
+        updater = ModelUpdater()
+        platforms_models = updater.get_all_platforms_models()
+        
+        model_info = {}
+        platform_name_mapping = {
+            'alibaba': '阿里云百炼',
+            'doubao': '火山豆包', 
+            'moonshot': '月之暗面',
+            'deepseek': 'DeepSeek',
+            'ollama': 'Ollama'
+        }
+        
+        for platform_key, platform_data in platforms_models.items():
+            platform_name = platform_name_mapping.get(platform_key, platform_data.platform)
+            
+            # Get top model for this platform
+            top_models = platform_data.get_top_models(1)
+            if top_models:
+                model = top_models[0]
+                # Format model info: Platform (Model Version)
+                model_info[platform_name] = f"{platform_name} ({model.name})"
+            else:
+                model_info[platform_name] = platform_name
+        
+        # Cache the results
+        _model_info_cache = model_info
+        _model_info_cache_timestamp = current_time
+        
+        logger.info(f"Model information cached for {len(model_info)} platforms")
+        return model_info
+        
+    except Exception as e:
+        logger.error(f"Failed to get model info: {e}")
+        # Return cached data if available, otherwise fallback to basic platform names
+        if _model_info_cache:
+            logger.info("Using cached model information due to error")
+            return _model_info_cache
+        else:
+            logger.info("Using fallback platform names")
+            return {platform: platform for platform in available_platforms}
+
+
+def refresh_model_info_cache():
+    """Manually refresh the model information cache."""
+    global _model_info_cache, _model_info_cache_timestamp
+    
+    # Clear cache to force refresh
+    _model_info_cache = {}
+    _model_info_cache_timestamp = 0
+    
+    # Get fresh model information
+    return get_platform_model_info()
+
+
 def get_platform_choices():
-    """Get available platform choices for UI."""
-    return [(platform, platform) for platform in available_platforms]
+    """Get available platform choices for UI with model version info."""
+    model_info = get_platform_model_info()
+    
+    # Filter to only include available platforms
+    choices = []
+    for platform in available_platforms:
+        display_name = model_info.get(platform, platform)
+        choices.append((display_name, platform))
+    
+    return choices
+
+
+def get_summary_model_choices():
+    """Get available summary model choices with model version info."""
+    model_info = get_platform_model_info()
+    
+    # Create choices for summary models
+    choices = []
+    for platform in available_platforms:
+        display_name = model_info.get(platform, platform)
+        choices.append((display_name, platform))
+    
+    return choices
 
 
 def process_uploaded_files(files) -> Tuple[List[Dict[str, Any]], str]:
@@ -259,18 +356,35 @@ async def start_conversation_async(conversation_id: str, progress_callback=None)
         raise
 
 
-def format_conversation_display(conversation, streaming_content=None) -> str:
+def format_conversation_display(conversation, streaming_content=None, progress_info=None) -> str:
     """Format conversation for display with streaming support."""
     if not conversation:
         return "🔍 未找到对话记录"
     
     output = []
-    output.append(f"# 🎯 讨论话题: {conversation.config.topic}")
-    output.append(f"**👥 参与者**: {', '.join(conversation.participants)}")
-    output.append(f"**📊 状态**: {conversation.state.value}")
-    output.append(f"**🔄 轮次**: {len(conversation.rounds)}/{conversation.config.max_rounds}")
-    output.append("")
-    output.append("---")
+    
+    # Fixed header with discussion topic, participants, and status
+    output.append('<div class="fixed-header">')
+    output.append('<div class="fixed-header-content">')
+    
+    # Participants in fixed header
+    output.append(f'<div class="discussion-participants">👥 参与者: {", ".join(conversation.participants)}</div>')
+    
+    # Enhanced status with progress info
+    if progress_info:
+        # Use dynamic progress information
+        status_text = f"📊 状态: {progress_info['status']} | 🔄 轮次: {progress_info['current_round']}/{progress_info['total_rounds']}"
+    else:
+        # Fallback to static status
+        status_text = f"📊 状态: {conversation.state.value} | 🔄 轮次: {len(conversation.rounds)}/{conversation.config.max_rounds}"
+    
+    output.append(f'<div class="discussion-metadata">{status_text}</div>')
+    
+    output.append('</div>')  # End fixed-header-content
+    output.append('</div>')  # End fixed-header
+    
+    # Conversation content area
+    output.append('<div class="conversation-content">')
     output.append("")
     
     if not conversation.rounds:
@@ -309,6 +423,8 @@ def format_conversation_display(conversation, streaming_content=None) -> str:
             output.append("---")
             output.append("")
         else:
+            # Close conversation-content container
+            output.append("</div>")  # End conversation-content
             return "\n".join(output)
     
     # 平台图标映射
@@ -353,33 +469,49 @@ def format_conversation_display(conversation, streaming_content=None) -> str:
                     # 确保内容不为空
                     content = msg.content if msg.content else "💭 [正在思考...]"
                     output.append(content)
+                    
+                    # 添加参考链接显示
+                    if msg.has_references():
+                        output.append("")
+                        output.append("📚 参考链接:")
+                        for ref in msg.references or []:
+                            title = ref.get('title', '未知标题')
+                            url = ref.get('url', '#')
+                            description = ref.get('description', '')
+                            
+                            if description:
+                                output.append(f"- 🔗 [{title}]({url}): {description}")
+                            else:
+                                output.append(f"- 🔗 [{title}]({url})")
+                    
                     output.append("")
         
         output.append("---")
         output.append("")
     
-
+    # Close conversation-content container
+    output.append("</div>")  # End conversation-content
     
     return "\n".join(output)
 
 
 def run_conversation(topic: str, max_rounds: int, participants: List[str], 
-                    round_timeout: float, progress_display):
+                    round_timeout: float):
     """Run a complete conversation workflow with streaming support."""
     if not conversation_manager:
-        yield "❌ 请先初始化LLM客户端", ""
+        yield "❌ 请先初始化LLM客户端"
         return
     
     # Create conversation
     create_result = create_conversation(topic, max_rounds, participants, round_timeout)
     if create_result.startswith("❌"):
-        yield create_result, ""
+        yield create_result
         return
     
     # Extract conversation ID
     conversation_id = create_result.split("ID: ")[1]
     
-    yield f"开始讨论话题: {topic}", ""
+    yield f"开始讨论话题: {topic}"
     
     # Progress tracking - 增强流式内容跟踪
     progress_info = {
@@ -471,18 +603,15 @@ def run_conversation(topic: str, max_rounds: int, participants: List[str],
         while not task.done():
             current_time = time.time()
             
-            # Update progress display
-            progress_text = f"**进度**: {progress_info['current_round']}/{progress_info['total_rounds']} 轮\n"
-            progress_text += f"**状态**: {progress_info['status']}\n"
-            if progress_info['current_platform']:
-                progress_text += f"**当前**: {progress_info['current_platform']}"
+            # Update progress display - compact format
+            # progress_text = f"{progress_info['current_round']}/{progress_info['total_rounds']} 轮 | {progress_info['status']}"
             
             # Get current conversation state
             current_conv = conversation_manager.get_conversation(conversation_id)
             
-            # Format display with streaming content
+            # Format display with streaming content and progress info
             streaming_content = progress_info["streaming_content"] if progress_info["active_streaming"] else None
-            conversation_display = format_conversation_display(current_conv, streaming_content) if current_conv else ""
+            conversation_display = format_conversation_display(current_conv, streaming_content, progress_info) if current_conv else ""
             
             # Force update if streaming content has changed or enough time has passed
             should_update = False
@@ -511,7 +640,7 @@ def run_conversation(topic: str, max_rounds: int, participants: List[str],
                 progress_info["force_update"] = False
             
             if should_update:
-                yield progress_text, conversation_display
+                yield conversation_display
                 last_update_time = current_time
             
             # Dynamic sleep - very short for responsive UI
@@ -526,21 +655,12 @@ def run_conversation(topic: str, max_rounds: int, participants: List[str],
         final_conversation = task.result()
         final_display = format_conversation_display(final_conversation)
         
-        yield "✅ 讨论完成！", final_display
+        yield final_display
         
     except Exception as e:
         error_msg = f"❌ 讨论过程中发生错误: {str(e)}"
-        logger.error(f"Conversation error: {e}", exc_info=True)
-        
-        # 提供更详细的错误信息和解决建议
-        if "No valid messages" in str(e):
-            error_msg += "\n\n💡 建议：请检查选择的平台是否正确初始化"
-        elif "timeout" in str(e).lower():
-            error_msg += "\n\n💡 建议：请尝试增加超时时间或检查网络连接"
-        elif "api" in str(e).lower():
-            error_msg += "\n\n💡 建议：请检查API密钥和网络连接"
-        
-        yield error_msg, ""
+        logger.error(error_msg)
+        yield error_msg
     finally:
         loop.close()
 
@@ -560,56 +680,13 @@ def export_conversation(conversation_id: str) -> str:
 def create_gradio_app() -> gr.Blocks:
     """Create the Gradio application."""
     
+    # Import professional UI components
+    from .ui_components import ProfessionalTheme, ProfessionalLayout, ConversationCard, StatusIndicator
+    
     with gr.Blocks(
-        title="LLM多方对话系统",
-        css="""
-        /* Force light text in dark mode - simplified approach */
-        @media (prefers-color-scheme: dark) {
-            .gradio-container,
-            .gradio-container * {
-                color: #e0e0e0 !important;
-            }
-            
-            .gradio-container input,
-            .gradio-container textarea {
-                color: #e0e0e0 !important;
-                background-color: #2a2a2a !important;
-                border: 1px solid #555 !important;
-            }
-            
-            .gradio-container input::placeholder,
-            .gradio-container textarea::placeholder {
-                color: #888 !important;
-            }
-            
-            .gradio-container .conversation-display {
-                background-color: #2a2a2a !important;
-                color: #e0e0e0 !important;
-            }
-        }
-        
-        /* Root variables for theming */
-        :root {
-            --text-color: #333333;
-            --bg-color: #f9f9f9;
-            --border-color: #ddd;
-            --streaming-bg: #e8f4f8;
-            --error-color: #d32f2f;
-            --error-bg: #ffebee;
-        }
-        
-        /* Dark mode support */
-        @media (prefers-color-scheme: dark) {
-            :root {
-                --text-color: #e0e0e0;
-                --bg-color: #2a2a2a;
-                --border-color: #555;
-                --streaming-bg: #1a3a4a;
-                --error-color: #ff6b6b;
-                --error-bg: #4a1a1a;
-            }
-        }
-        
+        title="🤖 LLM Chats - 多模型协作深度研究平台",
+        css=ProfessionalTheme.get_css() + """
+        /* Application-specific overrides */
         .gradio-container {
             max-width: 100% !important;
             width: 100% !important;
@@ -617,33 +694,12 @@ def create_gradio_app() -> gr.Blocks:
             padding: 20px !important;
         }
         
-        /* Main conversation display area */
-        .conversation-display {
-            max-height: 70vh;
-            overflow-y: auto;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 15px;
-            background-color: var(--bg-color);
-            color: var(--text-color) !important;
-        }
-        
-        /* Streaming content animation */
-        .streaming-content {
-            position: relative;
-            animation: pulse 1.5s ease-in-out infinite;
-        }
-        
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.7; }
-            100% { opacity: 1; }
-        }
+        /* Main conversation display area - will use component styles */
         
         /* Typing cursor animation */
         .typing-cursor {
             animation: blink 1s infinite;
-            color: #007bff;
+            color: var(--primary-color);
             font-weight: bold;
         }
         
@@ -652,108 +708,6 @@ def create_gradio_app() -> gr.Blocks:
             50% { opacity: 0; }
             100% { opacity: 1; }
         }
-        .conversation-display * {
-            color: var(--text-color) !important;
-        }
-        
-        /* Streaming content styling */
-        .streaming-content {
-            background-color: var(--streaming-bg);
-            border-left: 4px solid #0066cc;
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 4px;
-            color: var(--text-color) !important;
-        }
-        
-        /* Text elements styling */
-        .gradio-container .markdown {
-            color: var(--text-color) !important;
-        }
-        .gradio-container .markdown * {
-            color: var(--text-color) !important;
-        }
-        .gradio-container .prose {
-            color: var(--text-color) !important;
-        }
-        .gradio-container .prose * {
-            color: var(--text-color) !important;
-        }
-        
-        /* Input elements */
-        .gradio-container .gr-textbox {
-            color: var(--text-color) !important;
-        }
-        .gradio-container .gr-textbox textarea {
-            color: var(--text-color) !important;
-        }
-        
-        /* General text elements */
-        .gradio-container p, 
-        .gradio-container div, 
-        .gradio-container span,
-        .gradio-container h1,
-        .gradio-container h2,
-        .gradio-container h3,
-        .gradio-container h4,
-        .gradio-container h5,
-        .gradio-container h6 {
-            color: var(--text-color) !important;
-        }
-        
-        /* Error message styling */
-        .gradio-container .gr-error {
-            color: var(--error-color) !important;
-            background-color: var(--error-bg) !important;
-        }
-        
-        /* Modal and alert styling */
-        .gradio-container .gr-alert {
-            color: var(--text-color) !important;
-        }
-        .gradio-container .gr-modal {
-            color: var(--text-color) !important;
-        }
-        .gradio-container .gr-modal * {
-            color: var(--text-color) !important;
-        }
-        
-        /* Comprehensive text color override */
-        .gradio-container * {
-            color: var(--text-color) !important;
-        }
-        
-        /* Force override any conflicting styles */
-        .gradio-container [style*="color: white"],
-        .gradio-container [style*="color: #ffffff"],
-        .gradio-container [style*="color: black"],
-        .gradio-container [style*="color: #000000"] {
-            color: var(--text-color) !important;
-        }
-        
-        /* Additional specific Gradio elements */
-        .gradio-container .wrap,
-        .gradio-container .block,
-        .gradio-container .panel,
-        .gradio-container .form,
-        .gradio-container .gr-compact {
-            color: var(--text-color) !important;
-        }
-        
-        /* Input field specific styling */
-        .gradio-container input[type="text"],
-        .gradio-container input[type="email"],
-        .gradio-container input[type="password"],
-        .gradio-container input[type="number"] {
-            color: var(--text-color) !important;
-        }
-        
-        /* Ensure all text nodes are visible */
-        .gradio-container [class*="label"],
-        .gradio-container [class*="text"],
-        .gradio-container [class*="title"],
-        .gradio-container [class*="description"] {
-            color: var(--text-color) !important;
         }
         
         /* Dark mode specific overrides */
@@ -843,7 +797,9 @@ def create_gradio_app() -> gr.Blocks:
         """
     ) as app:
         
-        gr.Markdown("# 🤖 LLM多方对话系统")
+        # Professional header
+        ProfessionalLayout.create_header()
+        
         gr.Markdown("让不同的AI模型就同一话题进行深入讨论，探索通过多方对话理解话题的效果。")
         
         with gr.Row():
@@ -919,26 +875,107 @@ def create_gradio_app() -> gr.Blocks:
                 )
                 
             with gr.Column(scale=3, min_width=600):
-                gr.Markdown("## 💬 对话进程")
-                
-                progress_display = gr.Markdown(
-                    value="等待开始讨论...",
-                    elem_classes=["conversation-display"]
-                )
-                
+                # Simplified conversation display - no card container
                 conversation_display = gr.Markdown(
                     value="",
+                    elem_classes=["conversation-display"],
+                    elem_id="conversation-display"
+                )
+                
+                # Summary section
+                gr.Markdown("## 📝 对话总结")
+                
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        summary_model = gr.Dropdown(
+                            label="总结模型",
+                            choices=[],
+                            value=None,
+                            info="选择用于生成总结的模型"
+                        )
+                        
+                        with gr.Row():
+                            summary_style = gr.Dropdown(
+                                label="文章风格",
+                                choices=[("学术研究", "academic"), ("博客文章", "blog"), ("研究报告", "report")],
+                                value="academic",
+                                info="选择总结文章的风格"
+                            )
+                            
+                            summary_format = gr.Dropdown(
+                                label="输出格式",
+                                choices=[("Markdown", "markdown"), ("HTML", "html"), ("JSON", "json")],
+                                value="markdown",
+                                info="选择总结的输出格式"
+                            )
+                        
+                        include_stats = gr.Checkbox(
+                            label="包含统计信息",
+                            value=True,
+                            info="是否在总结中包含对话统计信息"
+                        )
+                        
+                        with gr.Row():
+                            generate_summary_btn = gr.Button(
+                                "生成总结",
+                                variant="primary",
+                                size="lg"
+                            )
+                            
+                            export_summary_btn = gr.Button(
+                                "导出总结",
+                                variant="secondary",
+                                interactive=False
+                            )
+                            
+                            update_models_btn = gr.Button(
+                                "更新模型",
+                                variant="secondary"
+                            )
+                    
+                    with gr.Column(scale=1):
+                        summary_status = gr.Textbox(
+                            label="总结状态",
+                            value="等待生成总结...",
+                            interactive=False,
+                            lines=3
+                        )
+                        
+                        update_status = gr.Textbox(
+                            label="模型更新状态",
+                            value="",
+                            interactive=False,
+                            lines=3,
+                            visible=False
+                        )
+                
+                summary_display = gr.Markdown(
+                    value="",
+                    label="总结结果",
                     elem_classes=["conversation-display"]
                 )
         
         # Global state for processed files
         processed_files_state = []
         
+        # Global state for summary
+        current_summary_result = None
+        
         # Event handlers
         def update_init_and_choices():
             result = initialize_clients()
+            
+            # Pre-fetch model information for better UX
+            if "✅ 成功初始化" in result:
+                try:
+                    get_platform_model_info()  # This will cache the model info
+                except Exception as e:
+                    logger.error(f"Failed to prefetch model info: {e}")
+            
             choices = get_platform_choices()
-            return result, gr.update(choices=choices, value=[])
+            # Also update summary model choices
+            summary_choices = get_summary_model_choices()
+            return result, gr.update(choices=choices, value=[]), gr.update(choices=summary_choices, value=summary_choices[0][1] if summary_choices else None)
         
         def handle_file_upload(files):
             """Handle file upload and processing."""
@@ -956,29 +993,45 @@ def create_gradio_app() -> gr.Blocks:
             else:
                 return gr.update(visible=False), gr.update(visible=False)
         
-        def run_conversation_with_files(topic, max_rounds, participants, round_timeout, progress_display):
-            """Run conversation with file attachments."""
+        def run_conversation_with_files(topic: str, max_rounds: int, participants: List[str], 
+                                round_timeout: float):
+            """Run conversation with file integration."""
             nonlocal processed_files_state
             
-            # Create conversation with files
-            creation_result = create_conversation_with_files(
-                topic, max_rounds, participants, round_timeout, processed_files_state
-            )
+            # If there are processed files, integrate them into the topic
+            if processed_files_state:
+                file_contexts = []
+                for processed_file in processed_files_state:
+                    file_context = format_file_content_for_context(processed_file)
+                    file_contexts.append(file_context)
+                
+                if file_contexts:
+                    enhanced_topic = f"{topic}\n\n" + "\n\n".join(file_contexts)
+                else:
+                    enhanced_topic = topic
+            else:
+                enhanced_topic = topic
+            
+            # Create conversation
+            if not conversation_manager:
+                yield "❌ 请先初始化LLM客户端"
+                return
+            
+            creation_result = create_conversation(enhanced_topic, max_rounds, participants, round_timeout)
             
             if not creation_result.startswith("✅"):
-                yield creation_result, ""
+                yield creation_result
                 return
             
-            # Extract conversation ID from result
-            conversation_id = creation_result.split("对话ID: ")[1] if "对话ID: " in creation_result else ""
+            # Extract conversation ID
+            conversation_id = creation_result.split("ID: ")[1]
             
             if not conversation_id:
-                yield "❌ 无法获取对话ID", ""
+                yield "❌ 无法获取对话ID"
                 return
             
-            # Run the conversation (reuse existing logic)
-            # Use yield from to properly delegate to the generator
-            yield from run_conversation(topic, max_rounds, participants, round_timeout, progress_display)
+            # Start the conversation
+            yield from run_conversation(enhanced_topic, max_rounds, participants, round_timeout)
         
         async def test_all_platforms(selected_platforms):
             """Test all selected platform configurations."""
@@ -992,9 +1045,91 @@ def create_gradio_app() -> gr.Blocks:
             
             return gr.update(value="\n".join(results), visible=True)
         
+        async def generate_summary(model_name, style, format_type, include_statistics):
+            """Generate conversation summary."""
+            nonlocal current_summary_result
+            
+            if not conversation_manager:
+                return "❌ 请先初始化LLM客户端", "", gr.update(interactive=False)
+            
+            # Get the most recent completed conversation
+            conversations = conversation_manager.list_conversations()
+            completed_conversations = [c for c in conversations if c.state == ConversationState.COMPLETED]
+            
+            if not completed_conversations:
+                return "❌ 没有找到已完成的对话", "", gr.update(interactive=False)
+            
+            # Get the most recent conversation
+            conversation = max(completed_conversations, key=lambda c: c.updated_at)
+            
+            if not model_name:
+                return "❌ 请选择总结模型", "", gr.update(interactive=False)
+            
+            try:
+                # Create summarizer
+                # conversation_manager is already checked above, so we can safely access it
+                assert conversation_manager is not None  # Type assertion for mypy
+                summarizer = ConversationSummarizer(conversation_manager.clients)
+                
+                # Create summary configuration - no length restrictions
+                config = SummaryConfig(
+                    output_format=format_type,
+                    include_metadata=True,
+                    include_statistics=include_statistics,
+                    language="zh",
+                    article_style=style
+                )
+                
+                # Generate summary
+                summary_result = await summarizer.generate_summary(conversation, model_name, config)
+                current_summary_result = summary_result
+                
+                return f"✅ 总结生成成功！使用模型: {model_name}", summary_result.content, gr.update(interactive=True)
+                
+            except Exception as e:
+                logger.error(f"Failed to generate summary: {e}")
+                return f"❌ 生成总结失败: {str(e)}", "", gr.update(interactive=False)
+        
+        def export_summary():
+            """Export the current summary."""
+            if not current_summary_result:
+                return "❌ 没有可导出的总结"
+            
+            try:
+                # Create summarizer to use export function
+                if not conversation_manager:
+                    return "❌ 对话管理器未初始化"
+                summarizer = ConversationSummarizer(conversation_manager.clients)
+                result = summarizer.export_summary(current_summary_result)
+                return result
+            except Exception as e:
+                return f"❌ 导出失败: {str(e)}"
+        
+        def update_models():
+            """Update model configurations."""
+            try:
+                updater = ModelUpdater()
+                # Get all platform models
+                platforms_models = updater.get_all_platforms_models()
+                
+                # Update env.example file
+                result = updater.update_env_example(platforms_models)
+                
+                # Generate models report
+                report = updater.generate_models_report(platforms_models)
+                
+                # Refresh model info cache after update
+                refresh_model_info_cache()
+                
+                return result, gr.update(value=report, visible=True)
+                
+            except Exception as e:
+                logger.error(f"Failed to update models: {e}")
+                return f"❌ 更新失败: {str(e)}", gr.update(visible=False)
+        
         init_btn.click(
             fn=update_init_and_choices,
-            outputs=[init_status, participants]
+            outputs=[init_status, participants, summary_model]
         )
         
         test_btn.click(
@@ -1012,22 +1147,40 @@ def create_gradio_app() -> gr.Blocks:
         
         start_btn.click(
             fn=run_conversation_with_files,
-            inputs=[topic_input, max_rounds, participants, round_timeout, progress_display],
-            outputs=[progress_display, conversation_display]
+            inputs=[topic_input, max_rounds, participants, round_timeout],
+            outputs=[conversation_display]
+        )
+        
+        # Summary event handlers
+        generate_summary_btn.click(
+            fn=generate_summary,
+            inputs=[summary_model, summary_style, summary_format, include_stats],
+            outputs=[summary_status, summary_display, export_summary_btn]
+        )
+        
+        export_summary_btn.click(
+            fn=export_summary,
+            outputs=[summary_status]
+        )
+        
+        update_models_btn.click(
+            fn=update_models,
+            outputs=[summary_status, update_status]
         )
         
         # Initialize on startup
         app.load(
             fn=update_init_and_choices,
-            outputs=[init_status, participants]
+            outputs=[init_status, participants, summary_model]
         )
         
-        # Add JavaScript for dark mode detection and text visibility
+        # Add JavaScript for professional UI enhancements
         app.load(
             None, 
             None, 
             None, 
-            js="""
+            js=ProfessionalTheme.get_js() + """
+            // Additional application-specific JavaScript
             (function() {
                 setTimeout(function() {
                     const isDarkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;

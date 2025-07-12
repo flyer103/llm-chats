@@ -19,7 +19,7 @@ class LLMConfig:
     api_key: str
     base_url: str
     temperature: float = 0.7
-    max_tokens: int = 1000
+    max_tokens: int = 3000  # 增加默认值以支持深度内容生成
     
     def __post_init__(self):
         if not self.api_key:
@@ -49,7 +49,7 @@ class PlatformConfigs:
                     api_key=alibaba_key,
                     base_url=os.getenv('ALIBABA_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1'),
                     temperature=float(os.getenv('ALIBABA_TEMPERATURE', '0.7')),
-                    max_tokens=int(os.getenv('ALIBABA_MAX_TOKENS', '1000'))
+                    max_tokens=int(os.getenv('ALIBABA_MAX_TOKENS', '3000'))  # 增加到3000以支持深度内容
                 )
             except ValueError as e:
                 logger.warning(f"阿里云百炼配置错误: {e}")
@@ -66,7 +66,7 @@ class PlatformConfigs:
                     api_key=doubao_key,
                     base_url=os.getenv('DOUBAO_BASE_URL', 'https://ark.cn-beijing.volces.com/api/v3'),
                     temperature=float(os.getenv('DOUBAO_TEMPERATURE', '0.7')),
-                    max_tokens=int(os.getenv('DOUBAO_MAX_TOKENS', '1000'))
+                    max_tokens=int(os.getenv('DOUBAO_MAX_TOKENS', '3000'))  # 增加到3000以支持深度内容
                 )
             except ValueError as e:
                 logger.warning(f"火山豆包配置错误: {e}")
@@ -82,7 +82,7 @@ class PlatformConfigs:
                     api_key=moonshot_key,
                     base_url=os.getenv('MOONSHOT_BASE_URL', 'https://api.moonshot.cn/v1'),
                     temperature=float(os.getenv('MOONSHOT_TEMPERATURE', '0.7')),
-                    max_tokens=int(os.getenv('MOONSHOT_MAX_TOKENS', '1000'))
+                    max_tokens=int(os.getenv('MOONSHOT_MAX_TOKENS', '3000'))  # 增加到3000以支持深度内容
                 )
             except ValueError as e:
                 logger.warning(f"月之暗面配置错误: {e}")
@@ -98,7 +98,7 @@ class PlatformConfigs:
                     api_key=deepseek_key,
                     base_url=os.getenv('DEEPSEEK_BASE_URL', 'https://api.deepseek.com/v1'),
                     temperature=float(os.getenv('DEEPSEEK_TEMPERATURE', '0.7')),
-                    max_tokens=int(os.getenv('DEEPSEEK_MAX_TOKENS', '1000'))
+                    max_tokens=int(os.getenv('DEEPSEEK_MAX_TOKENS', '3000'))  # 增加到3000以支持深度内容
                 )
             except ValueError as e:
                 logger.warning(f"DeepSeek配置错误: {e}")
@@ -119,7 +119,7 @@ class PlatformConfigs:
                     api_key=os.getenv('OLLAMA_API_KEY', 'ollama'),  # Ollama doesn't require API key
                     base_url=base_url,
                     temperature=float(os.getenv('OLLAMA_TEMPERATURE', '0.7')),
-                    max_tokens=int(os.getenv('OLLAMA_MAX_TOKENS', '1000'))
+                    max_tokens=int(os.getenv('OLLAMA_MAX_TOKENS', '2000'))  # 增加到2000，本地模型稍微保守一些
                 )
                 logger.info(f"Ollama配置: {base_url}, 模型: {ollama_config.model}")
             except ValueError as e:
