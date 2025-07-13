@@ -33,47 +33,91 @@ class ConversationConfig:
     def __post_init__(self):
         if not self.system_prompt:
             # Default system prompt for multi-participant discussions
-            self.system_prompt = f"""你是一个AI助手，正在参与关于"{self.topic}"的多方讨论。
+            self.system_prompt = f"""你是一个资深专家，正在参与关于"{self.topic}"的深度学术讨论。
 
-讨论规则：
-1. 请就主题发表你的观点和见解
-2. 认真倾听其他参与者的观点
-3. 可以提出问题、反驳或补充
-4. 保持讨论的建设性和深度
-5. 每次回复控制在200字以内
-6. 避免重复之前已经充分讨论的内容
+深度讨论要求：
+1. **内容深度**: 提供深刻、独到的见解，从理论基础、实践应用、发展趋势等多维度分析
+2. **字数要求**: 每次回复控制在1000-2000字，确保内容充实而不冗长
+3. **逻辑结构**: 使用清晰的论证逻辑，包含问题分析、解决方案、案例验证等
+4. **视觉辅助**: 积极使用表格、流程图、对比图等Markdown格式的图表来增强理解
+5. **批判思维**: 对其他参与者的观点进行建设性的质疑、补充或扩展
+6. **创新观点**: 提出原创性的见解，避免简单重复已有观点
+7. **实践导向**: 结合具体案例、数据、实验结果来支撑观点
 
-当前讨论主题：{self.topic}"""
+技术写作要求：
+- 使用Markdown格式创建表格对比不同方案
+- 用代码块展示关键算法或配置
+- 使用列表和编号来组织复杂信息
+- 通过引用块突出重要观点或定义
+
+参考文献要求：
+- 每个主要观点提供2-3个权威参考链接
+- 包含学术论文、技术文档、行业报告等
+- 使用格式：[论文标题](DOI链接) 或 [文档标题](官方链接)
+- 链接必须真实有效，来源权威可信
+
+当前讨论主题：{self.topic}
+
+请以专业、深入、有见地的方式参与讨论，每轮发言都要有实质性的贡献和独特的价值。"""
     
     def set_system_prompt_for_participants(self, participant_count: int):
         """Set system prompt based on participant count."""
         if participant_count == 1:
-            self.system_prompt = f"""你是一个AI助手，正在深入分析和思考话题"{self.topic}"。
+            self.system_prompt = f"""你是一位资深研究员，正在对话题"{self.topic}"进行深度独立分析和研究。
 
-分析要求：
-1. 请从多个角度深入分析这个话题
-2. 每轮思考时可以选择不同的视角或层面
-3. 可以提出问题、假设和论证
-4. 保持分析的逻辑性和深度
-5. 每次回复控制在300字以内
-6. 逐步深入，避免重复相同的观点
+深度分析要求：
+1. **全面性分析**: 从理论基础、技术实现、应用场景、发展趋势等多个维度进行综合分析
+2. **字数要求**: 每轮分析控制在1000-2000字，确保内容深入且结构完整
+3. **逻辑递进**: 每轮都在前一轮基础上深入，形成层层递进的分析体系
+4. **数据驱动**: 结合具体数据、案例研究、实验结果来支撑分析结论
+5. **批判性思维**: 对现有方案进行客观评估，指出优势、局限性和改进方向
+6. **前瞻性洞察**: 预测发展趋势，提出创新性的解决方案或研究方向
+7. **系统性思考**: 考虑技术、经济、社会、环境等多重因素的相互影响
+
+技术分析规范：
+- 使用表格对比不同技术方案的优缺点
+- 绘制流程图展示系统架构或处理流程
+- 提供代码示例说明关键实现细节
+- 使用图表展示性能对比或趋势分析
+- 通过引用块突出核心观点和定义
+
+学术研究标准：
+- 每个主要论点提供3-5个权威参考文献
+- 引用最新的学术论文、技术报告、行业白皮书
+- 参考格式：[论文标题](DOI链接) 或 [报告标题](官方链接)
+- 确保引用来源的权威性和时效性
 
 当前分析主题：{self.topic}
 
-你将进行多轮深入思考，每轮都尝试从新的角度或更深的层面来分析这个话题。"""
+请以学者的严谨态度进行深度分析，每轮都要有突破性的见解和实质性的贡献，形成具有学术价值的研究成果。"""
         else:
-            # Keep the original multi-participant prompt
-            self.system_prompt = f"""你是一个AI助手，正在参与关于"{self.topic}"的多方讨论。
+            # Enhanced multi-participant prompt for deep discussions
+            self.system_prompt = f"""你是一个资深专家，正在参与关于"{self.topic}"的深度学术讨论。
 
-讨论规则：
-1. 请就主题发表你的观点和见解
-2. 认真倾听其他参与者的观点
-3. 可以提出问题、反驳或补充
-4. 保持讨论的建设性和深度
-5. 每次回复控制在200字以内
-6. 避免重复之前已经充分讨论的内容
+深度讨论要求：
+1. **内容深度**: 提供深刻、独到的见解，从理论基础、实践应用、发展趋势等多维度分析
+2. **字数要求**: 每次回复控制在1000-2000字，确保内容充实而不冗长
+3. **逻辑结构**: 使用清晰的论证逻辑，包含问题分析、解决方案、案例验证等
+4. **视觉辅助**: 积极使用表格、流程图、对比图等Markdown格式的图表来增强理解
+5. **批判思维**: 对其他参与者的观点进行建设性的质疑、补充或扩展
+6. **创新观点**: 提出原创性的见解，避免简单重复已有观点
+7. **实践导向**: 结合具体案例、数据、实验结果来支撑观点
 
-当前讨论主题：{self.topic}"""
+技术写作要求：
+- 使用Markdown格式创建表格对比不同方案
+- 用代码块展示关键算法或配置
+- 使用列表和编号来组织复杂信息
+- 通过引用块突出重要观点或定义
+
+参考文献要求：
+- 每个主要观点提供2-3个权威参考链接
+- 包含学术论文、技术文档、行业报告等
+- 使用格式：[论文标题](DOI链接) 或 [文档标题](官方链接)
+- 链接必须真实有效，来源权威可信
+
+当前讨论主题：{self.topic}
+
+请以专业、深入、有见地的方式参与讨论，每轮发言都要有实质性的贡献和独特的价值。"""
 
 
 @dataclass
@@ -132,7 +176,8 @@ class Conversation:
                             "role": m.role,
                             "content": m.content,
                             "platform": m.platform,
-                            "timestamp": m.timestamp
+                            "timestamp": m.timestamp,
+                            "references": m.references if m.has_references() else []
                         }
                         for m in r.messages
                     ],
@@ -241,6 +286,13 @@ class ConversationManager:
                             else:
                                 user_prompt = f"基于以上讨论，请继续就话题'{conversation.config.topic}'发表你的观点。"
                         
+                        # Add reference links from previous rounds for validation
+                        if round_num > 1:
+                            previous_references = self._collect_previous_references(conversation, round_num - 1)
+                            if previous_references:
+                                reference_text = self._format_references_for_validation(previous_references)
+                                user_prompt += f"\n\n以下是其他参与者在之前轮次中提供的参考链接，请在你的回复中验证、引用或补充：\n{reference_text}"
+                        
                         context.append(Message(
                             role="user",
                             content=user_prompt,
@@ -336,6 +388,12 @@ class ConversationManager:
                             platform=platform,
                             timestamp=message_timestamp
                         )
+                        
+                        # Extract references from the response
+                        references = message.extract_references_from_content()
+                        if references:
+                            message.references = references
+                            logger.info(f"Extracted {len(references)} references from {platform} response")
                         
                         round_obj.messages.append(message)
                         
@@ -453,4 +511,88 @@ class ConversationManager:
         if not conversation:
             raise ValueError(f"Conversation {conversation_id} not found")
         
-        return json.dumps(conversation.to_dict(), ensure_ascii=False, indent=2) 
+        return json.dumps(conversation.to_dict(), ensure_ascii=False, indent=2)
+    
+    def get_available_summarizers(self) -> List[str]:
+        """Get list of available models for summarization."""
+        return list(self.clients.keys())
+    
+    def can_summarize_conversation(self, conversation_id: str) -> bool:
+        """Check if a conversation can be summarized."""
+        conversation = self.conversations.get(conversation_id)
+        if not conversation:
+            return False
+        
+        # Can summarize if conversation is completed and has messages
+        return (conversation.state == ConversationState.COMPLETED and 
+                len(conversation.get_all_messages()) > 0)
+    
+    def get_summary_statistics(self, conversation_id: str) -> Dict[str, Any]:
+        """Get statistics about a conversation for summarization."""
+        conversation = self.conversations.get(conversation_id)
+        if not conversation:
+            raise ValueError(f"Conversation {conversation_id} not found")
+        
+        messages = conversation.get_all_messages()
+        user_assistant_messages = [msg for msg in messages if msg.role in ["user", "assistant"]]
+        
+        stats = {
+            "total_messages": len(messages),
+            "content_messages": len(user_assistant_messages),
+            "total_rounds": len(conversation.rounds),
+            "participants": len(conversation.participants),
+            "participant_names": conversation.participants,
+            "total_words": sum(len(msg.content.split()) for msg in user_assistant_messages),
+            "average_words_per_message": 0,
+            "conversation_duration": 0
+        }
+        
+        if user_assistant_messages:
+            stats["average_words_per_message"] = stats["total_words"] / len(user_assistant_messages)
+        
+        # Calculate conversation duration
+        if conversation.rounds:
+            first_round = conversation.rounds[0]
+            last_round = conversation.rounds[-1]
+            if first_round.start_time and last_round.end_time:
+                stats["conversation_duration"] = last_round.end_time - first_round.start_time
+        
+        return stats
+    
+    def _collect_previous_references(self, conversation: Conversation, up_to_round: int) -> List[Dict[str, Any]]:
+        """Collect reference links from previous rounds."""
+        references = []
+        
+        for round_obj in conversation.rounds[:up_to_round]:
+            for message in round_obj.messages:
+                if message.role == "assistant" and message.has_references():
+                    for ref in message.references or []:
+                        references.append({
+                            "platform": message.platform,
+                            "round": round_obj.round_number,
+                            "title": ref.get("title", ""),
+                            "url": ref.get("url", ""),
+                            "description": ref.get("description", "")
+                        })
+        
+        return references
+    
+    def _format_references_for_validation(self, references: List[Dict[str, Any]]) -> str:
+        """Format reference links for validation prompt."""
+        if not references:
+            return ""
+        
+        formatted_refs = []
+        for ref in references:
+            platform = ref.get("platform", "未知平台")
+            round_num = ref.get("round", 0)
+            title = ref.get("title", "未知标题")
+            url = ref.get("url", "#")
+            description = ref.get("description", "")
+            
+            if description:
+                formatted_refs.append(f"- {platform} (第{round_num}轮): [{title}]({url}) - {description}")
+            else:
+                formatted_refs.append(f"- {platform} (第{round_num}轮): [{title}]({url})")
+        
+        return "\n".join(formatted_refs) 

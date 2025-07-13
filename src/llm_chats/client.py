@@ -65,6 +65,8 @@ class Message:
     timestamp: Optional[float] = None
     # File attachment support
     attachments: Optional[List[Dict[str, Any]]] = None
+    # Reference links support
+    references: Optional[List[Dict[str, str]]] = None
     
     def has_attachments(self) -> bool:
         """Check if message has attachments."""
@@ -91,6 +93,61 @@ class Message:
                 summaries.append(f"❌ {name} ({mime_type}, processing failed)")
         
         return "\n".join(summaries)
+    
+    def has_references(self) -> bool:
+        """Check if message has reference links."""
+        return self.references is not None and len(self.references) > 0
+    
+    def get_references_summary(self) -> str:
+        """Get a summary of reference links for display."""
+        if not self.has_references():
+            return ""
+        
+        summaries = []
+        # mypy: self.references is not None here because has_references() returned True
+        for ref in self.references or []:
+            title = ref.get('title', '未知标题')
+            url = ref.get('url', '#')
+            description = ref.get('description', '')
+            
+            if description:
+                summaries.append(f"🔗 [{title}]({url}): {description}")
+            else:
+                summaries.append(f"🔗 [{title}]({url})")
+        
+        return "\n".join(summaries)
+    
+    def extract_references_from_content(self) -> List[Dict[str, str]]:
+        """Extract reference links from message content using regex."""
+        import re
+        
+        references = []
+        
+        # Pattern to match markdown links: [title](url)
+        markdown_pattern = r'\[([^\]]+)\]\(([^)]+)\)'
+        matches = re.findall(markdown_pattern, self.content)
+        
+        for title, url in matches:
+            references.append({
+                'title': title.strip(),
+                'url': url.strip(),
+                'description': ''
+            })
+        
+        # Pattern to match plain URLs
+        url_pattern = r'https?://[^\s<>"\']+[^\s<>"\'.,;!?]'
+        url_matches = re.findall(url_pattern, self.content)
+        
+        for url in url_matches:
+            # Don't duplicate if already in markdown format
+            if not any(ref['url'] == url for ref in references):
+                references.append({
+                    'title': url,
+                    'url': url,
+                    'description': ''
+                })
+        
+        return references
 
 
 @dataclass
@@ -550,18 +607,36 @@ class OllamaClient(BaseLLMClient):
                                     if chunk_content:  # Only process non-empty chunks
                                         total_response_content += chunk_content
                                         
-                                        # Update state and filter think blocks in real-time
-                                        if '<think>' in chunk_content:
-                                            in_think_block = True
-                                            # Extract any content before <think> tag
+                                        # Enhanced think block filtering with better logic
+                                        if '<think>' in chunk_content and '</think>' in chunk_content:
+                                            # Handle complete think blocks in a single chunk
+                                            parts = chunk_content.split('<think>')
+                                            before_think = parts[0]
+                                            remaining = '<think>'.join(parts[1:])
+                                            
+                                            # Yield content before think tag
+                                            if before_think:
+                                                logger.debug(f"Yielding content before think: '{before_think}'")
+                                                yield before_think
+                                            
+                                            # Handle content after think tag
+                                            after_parts = remaining.split('</think>')
+                                            if len(after_parts) > 1:
+                                                after_think = '</think>'.join(after_parts[1:])
+                                                if after_think:
+                                                    logger.debug(f"Yielding content after think: '{after_think}'")
+                                                    yield after_think
+                                        elif '<think>' in chunk_content:
+                                            # Start of think block
                                             before_think = chunk_content.split('<think>')[0]
                                             if before_think and not in_think_block:
                                                 logger.debug(f"Yielding content before think: '{before_think}'")
                                                 yield before_think
+                                            in_think_block = True
                                         elif '</think>' in chunk_content:
-                                            in_think_block = False
-                                            # Extract any content after </think> tag
+                                            # End of think block
                                             after_think = chunk_content.split('</think>')[-1]
+                                            in_think_block = False
                                             if after_think:
                                                 logger.debug(f"Yielding content after think: '{after_think}'")
                                                 yield after_think
@@ -569,7 +644,11 @@ class OllamaClient(BaseLLMClient):
                                             # Normal content outside think blocks
                                             logger.debug(f"Yielding normal chunk: '{chunk_content}'")
                                             yield chunk_content
-                                            
+                                        else:
+                                            # Inside think block - don't yield but log for debugging
+                                            logger.debug(f"Filtering think content: '{chunk_content}'")
+                                            pass
+                                    
                                     elif data.get('done', False):
                                         # This is the final chunk, might be empty
                                         logger.debug("Received final chunk (done=True)")
